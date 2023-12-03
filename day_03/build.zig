@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
-        .name = "day_00",
+        .name = "day_02",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
@@ -36,4 +36,3 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 }
-
