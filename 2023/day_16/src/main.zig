@@ -37,7 +37,6 @@ const Vec = struct {
 };
 
 const Beam = struct {
-	const Self = @This();
 	position: Vec,
 	direction: Direction,
 };
@@ -52,7 +51,12 @@ const Layout = struct {
 	energy: std.ArrayList(usize),
 	beams: std.ArrayList(Beam),
 
-	pub fn deinit(self: Self) void {
+	pub fn reset(self: *Self) void {
+		@memset(self.energy.items, 0);
+		self.beams.clearRetainingCapacity();
+	}
+
+	pub fn deinit(self: *Self) void {
 		self.grid.deinit();
 		self.energy.deinit();
 		self.beams.deinit();
@@ -72,13 +76,9 @@ const Layout = struct {
 	pub fn prepare(self: *Self) !void {
 		var e = try self.energy.addManyAsSlice(@intCast(self.w*self.h));
 		@memset(e, 0);
-		try self.beams.append(.{
-			.position = .{.x = 0, .y = 0},
-			.direction = .Right
-		});
 	}
 
-	pub fn count_energized_tiles(self: *Self) usize {
+	pub fn count_energized_tiles(self: *const Self) usize {
 		var c: usize = 0;
 		for (self.energy.items) |e| {
 			if (e != 0) {
@@ -95,16 +95,16 @@ const Layout = struct {
 		self.h += 1;
 	}
 
-	pub fn contains(self: *Self, beam: *const Beam) bool {
+	pub fn contains(self: *const Self, beam: *const Beam) bool {
 		return 0 <= beam.position.x and beam.position.x < self.w and 0 <= beam.position.y and beam.position.y < self.h;
 	}
 
 	pub fn run_beams(self: *Self) !void {
 		var visited = std.ArrayList(u8).init(self.allocator);
-		var vs = try visited.addManyAsSlice(@intCast(self.w*self.h));
-		@memset(vs, 0x00);
-
 		defer visited.deinit();
+		var vs = try visited.addManyAsSlice(@intCast(self.w*self.h));
+		@memset(vs, 0);
+
 		while (self.beams.items.len > 0) {
 			var beam = self.beams.pop();
 			if (!self.contains(&beam)) {
@@ -184,6 +184,13 @@ const Layout = struct {
 	}
 };
 
+pub fn energy_for_starting_beam(layout: *Layout, beam: Beam) !usize {
+	layout.reset();
+	try layout.beams.append(beam);
+	try layout.run_beams();
+	return layout.count_energized_tiles();
+}
+
 pub fn main() !void {
 	var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 	const allocator = gpa.allocator();
@@ -199,24 +206,40 @@ pub fn main() !void {
 		try layout.append_row(line);
 	}
 	try layout.prepare();
-	try layout.run_beams();
 
-	for (0..@intCast(layout.h)) |y| {
-		for (0..@intCast(layout.w)) |x| {
-			try stdout.print("{c}", .{layout.grid.items[y*@as(usize, @intCast(layout.w))+x]});
-		}
-		try stdout.print("\n", .{});
-	}
-	try stdout.print("\n", .{});
-	for (0..@intCast(layout.h)) |y| {
-		for (0..@intCast(layout.w)) |x| {
-			try stdout.print("{d}", .{layout.energy.items[y*@as(usize, @intCast(layout.w))+x]});
-		}
-		try stdout.print("\n", .{});
-	}
-	try stdout.print("\n", .{});
+	const part1 = try energy_for_starting_beam(&layout, .{
+		.position = .{.x = 0, .y = 0},
+		.direction = .Right
+	});
+	try stdout.print("{d}\n", .{part1});
 
-	const en = layout.count_energized_tiles();
-	try stdout.print("{d}\n", .{en});
+	var part2: usize = 0;
+	for (0..@intCast(layout.w)) |x| {
+		const e1 = try energy_for_starting_beam(&layout, .{
+			.position = .{.x = @intCast(x), .y = 0},
+			.direction = .Down,
+		});
+		part2 = @max(part2, e1);
+		const e2 = try energy_for_starting_beam(&layout, .{
+			.position = .{.x = @intCast(x), .y = layout.h-1},
+			.direction = .Up,
+		});
+		part2 = @max(part2, e2);
+	}
+	for (0..@intCast(layout.h)) |y| {
+		const e1 = try energy_for_starting_beam(&layout, .{
+			.position = .{.x = 0, .y = @intCast(y)},
+			.direction = .Right,
+		});
+		part2 = @max(part2, e1);
+		const e2 = try energy_for_starting_beam(&layout, .{
+			.position = .{.x = layout.w-1, .y = @intCast(y)},
+			.direction = .Left,
+		});
+		part2 = @max(part2, e2);
+	}
+
+	try stdout.print("{d}\n", .{part2});
+	layout.reset();
 }
 
