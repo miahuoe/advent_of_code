@@ -40,7 +40,7 @@ const Step = struct {
 	}
 
 	pub fn approach(self: Self) usize {
-		return @as(usize, @intFromEnum(self.direction)) * 5 + self.steps;
+		return @as(usize, @intFromEnum(self.direction)) * 12 + self.steps;
 	}
 };
 
@@ -131,7 +131,7 @@ const Map = struct {
 		self.visited.items[a * self.cost.items.len + p] = true;
 	}
 
-	pub fn find_path(self: *Self) !usize {
+	pub fn find_path(self: *Self, min: usize, max: usize) !usize {
 		var V = try self.visited.addManyAsSlice(self.cost.items.len*100);
 		@memset(V, false);
 		var min_hl: usize = 99999999;
@@ -164,15 +164,20 @@ const Map = struct {
 				n.cost = self.cost.items[ni];
 				n.heat_loss = Q.heat_loss + n.cost;
 				n.steps = 1;
-				if (Q.direction == n.direction) {
+				if (n.x == self.w-1 and n.y == self.h-1) {
+					min_hl = @min(min_hl, n.heat_loss);
+					continue;
+				}
+				if (Q.direction == .None) {
+				} else if (Q.direction == n.direction) {
 					n.steps += Q.steps;
-				}
-				if (n.steps <= 3) {
-					if (n.x == self.w-1 and n.y == self.h-1) {
-						min_hl = @min(min_hl, n.heat_loss);
+					if (n.steps > max) {
+						continue;
 					}
-					try q.add(n);
+				} else if (Q.steps < min) {
+					continue;
 				}
+				try q.add(n);
 			}
 		}
 		return min_hl;
@@ -193,9 +198,12 @@ pub fn main() !void {
 	while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
 		try map.append_row(line);
 	}
-
-	const part1 = try map.find_path();
-
+	@memset(map.visited.items, false);
+	const part1 = try map.find_path(0, 3);
 	try stdout.print("{d}\n", .{part1});
+
+	@memset(map.visited.items, false);
+	const part2 = try map.find_path(4, 10);
+	try stdout.print("{d}\n", .{part2});
 }
 
