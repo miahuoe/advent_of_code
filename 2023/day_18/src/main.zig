@@ -8,12 +8,12 @@ const Direction = enum {
 };
 
 const Wall = struct {
-	y: i64,
-	x1: i64,
-	x2: i64,
+	x: i64,
+	y1: i64,
+	y2: i64,
 
 	pub fn cmp(ctx: void, a: Wall, b: Wall) bool {
-		return std.sort.asc(i64)(ctx, a.y, b.y);
+		return std.sort.asc(i64)(ctx, a.x, b.x);
 	}
 };
 
@@ -56,98 +56,133 @@ const PlanItem = struct {
 	}
 };
 
-pub fn get_area(plan: *const std.ArrayList(PlanItem)) !i64 {
-	var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-	const allocator = gpa.allocator();
-
+pub fn walls_from_plan(plan: *const std.ArrayList(PlanItem), allocator: std.mem.Allocator) !std.ArrayList(Wall) {
 	var walls = std.ArrayList(Wall).init(allocator);
-	defer walls.deinit();
 
 	var px: i64 = 0;
 	var py: i64 = 0;
 	for (plan.items) |pi| {
 		switch (pi.direction) {
 			.Right => {
-				var wall = Wall{.y = py, .x1 = px, .x2 = px + pi.length};
 				px += pi.length;
-				try walls.append(wall);
 			},
 			.Left => {
-				var wall = Wall{.y = py, .x1 = px - pi.length, .x2 = px};
 				px -= pi.length;
-				try walls.append(wall);
 			},
 			.Up => {
+				var wall = Wall{.x = px, .y1 = py - pi.length, .y2 = py};
+				try walls.append(wall);
 				py -= pi.length;
 			},
 			.Down => {
+				var wall = Wall{.x = px, .y1 = py, .y2 = py + pi.length};
+				try walls.append(wall);
 				py += pi.length;
 			},
 		}
 	}
 	std.sort.insertion(Wall, walls.items, {}, Wall.cmp);
+	return walls;
+}
 
-	var x_min: i64 = 10000000;
-	var x_max: i64 = -10000000;
-	for (walls.items) |w| {
-		x_min = @min(x_min, w.x1);
-		x_max = @max(x_max, w.x2);
+const Span = struct {
+	a: i64,
+	b: i64,
+
+	pub fn cmp(_: void, X: Span, Y: Span) bool {
+		if (X.a == Y.a) {
+			return X.b < Y.b;
+		}
+		return X.a < Y.a;
 	}
-	var y_min: i64 = walls.items[0].y;
-	//var y_max: i64 = walls.items[walls.items.len-1].y;
-	const width: usize = @intCast(x_max-x_min+1);
+};
+
+pub fn get_area(plan: *const std.ArrayList(PlanItem), allocator: std.mem.Allocator) !i64 {
+	var walls = try walls_from_plan(plan, allocator);
+	defer walls.deinit();
 
 	var total_area: i64 = 0;
-	var scanline = try allocator.alloc(u8, 100000000);
-	defer allocator.free(scanline);
-	@memset(scanline, '.');
-
+	var x: i64 = walls.items[0].x;
+	var nx: i64 = 0;
 	var wi: usize = 0;
-	var y: i64 = y_min;
+	var spans = std.ArrayList(Span).init(allocator);
+	defer spans.deinit();
 	while (wi < walls.items.len) {
+		var area_before: i64 = 0;
+		for (spans.items) |s| {
+			area_before += s.b - s.a + 1;
+		}
 		while (wi < walls.items.len) : (wi += 1) {
 			const w = walls.items[wi];
-			if (w.y != y) {
+			if (w.x != x) {
+				nx = w.x;
 				break;
 			}
-			var i = w.x1 - x_min;
-			while (i <= w.x2 - x_min) : (i += 1) {
-				const j: usize = @intCast(i);
-				const val = scanline[j];
-				if (val == '#') {
-					scanline[j] = 'X';
-				} else if (val == '.') {
-					scanline[j] = '@';
+			const N = Span{.a = w.y1, .b = w.y2};
+			var i: usize = 0;
+			var found = false;
+			while (i < spans.items.len) : (i += 1) {
+				var O = &spans.items[i];
+				if (O.a == N.a) {
+					O.a = N.b;
+					found = true;
+					break;
+				}
+				if (O.b == N.b) {
+					O.b = N.a;
+					found = true;
+					break;
+				}
+				if (O.b == N.a) {
+					O.b = N.b;
+					found = true;
+					break;
+				}
+				if (O.a == N.b) {
+					O.a = N.a;
+					found = true;
+					break;
+				}
+				if (O.a < N.a and N.b < O.b) { // split
+					try spans.append(.{.a = N.b, .b = O.b});
+					O.b = N.a;
+					found = true;
+					break;
 				}
 			}
-			var idx2: usize = @intCast(w.x2 - x_min);
-			if (idx2+1 < width) {
-				if (scanline[idx2+1] == '#') {
-					scanline[idx2] = '#';
+			if (!found) {
+				try spans.append(N);
+			}
+			i = 0;
+			while (i < spans.items.len) {
+				var s = &spans.items[i];
+				if (s.a == s.b) {
+					_ = spans.orderedRemove(i);
+					continue;
 				}
+				i += 1;
 			}
-			var idx1: usize = @intCast(w.x1 - x_min);
-			if (idx1 > 0) {
-				if (scanline[idx1-1] == '#') {
-					scanline[idx1] = '#';
+			std.sort.insertion(Span, spans.items, {}, Span.cmp);
+			i = 1;
+			while (i < spans.items.len) {
+				var s1 = &spans.items[i-1];
+				var s2 = &spans.items[i];
+				if (s1.b == s2.a) {
+					s1.b = s2.b;
+					_ = spans.orderedRemove(i);
+					continue;
 				}
+				i += 1;
 			}
 		}
-		var c: i64 = 0;
-		for (0..width) |si| {
-			if (scanline[si] != '.') {
-				c += 1;
-			}
+		var area_after: i64 = 0;
+		for (spans.items) |s| {
+			area_after += s.b - s.a + 1;
 		}
-		for (0..width) |si| {
-			if (scanline[si] == '@') {
-				scanline[si] = '#';
-			} else if (scanline[si] == 'X') {
-				scanline[si] = '.';
-			}
-		}
-		total_area += c;
-		y += 1;
+		const dx = nx - x;
+		total_area += @max(area_before, area_after);
+		total_area += (dx-1)*area_after;
+		x = nx;
 	}
 	return total_area;
 }
@@ -173,9 +208,12 @@ pub fn main() !void {
 		var p2 = try PlanItem.part2_from(line) orelse continue;
 		try plan2.append(p2);
 	}
-	const part1 = try get_area(&plan1);
+	// TODO after optimization:
+	// for input: part2 works but part1 is broken (for my input)
+	// for example: both parts work
+	const part1 = try get_area(&plan1, allocator);
 	try stdout.print("{d}\n", .{part1});
-	const part2 = try get_area(&plan2);
+	const part2 = try get_area(&plan2, allocator);
 	try stdout.print("{d}\n", .{part2});
 }
 
