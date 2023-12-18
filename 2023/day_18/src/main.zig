@@ -20,7 +20,6 @@ const Wall = struct {
 const PlanItem = struct {
 	direction: Direction,
 	length: i64,
-	color: [3]u8,
 
 	pub fn part1_from(line: []u8) !?PlanItem {
 		var pi: PlanItem = undefined;
