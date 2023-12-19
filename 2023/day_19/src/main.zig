@@ -1,9 +1,5 @@
 const std = @import("std");
 
-const Category = enum {
-	X, M, A, S,
-};
-
 const Comparsion = enum {
 	Lt,
 	Gt,
@@ -48,6 +44,43 @@ pub fn name_from_str(s: []const u8) [3]u8 {
 	return n;
 }
 
+const PartRange = struct {
+	const Self = @This();
+
+	begin: [4]usize,
+	end: [4]usize,
+
+	pub fn combs(self: *const Self) usize {
+		var p: usize = 1;
+		for (self.begin, self.end) |b, e| {
+			p *= e-b+1;
+		}
+		return p;
+	}
+
+	pub fn all() Self {
+		return .{.begin = [4]usize{1, 1, 1, 1}, .end = [4]usize{4000, 4000, 4000, 4000}};
+	}
+
+	pub fn split_ge(self: Self, idx: usize, at: usize) [2]?PartRange {
+		var prs = [2]?PartRange{null, null};
+		if (at <= self.begin[idx]) {
+			prs[1] = self;
+		} else if (self.end[idx] < at) {
+			prs[0] = self;
+		} else {
+			var c1 = self;
+			c1.end[idx] = at-1;
+			prs[0] = c1;
+
+			var c2 = self;
+			c2.begin[idx] = at;
+			prs[1] = c2;
+		}
+		return prs;
+	}
+};
+
 const PartRatings = struct {
 	const Self = @This();
 
@@ -84,8 +117,8 @@ const PartRatings = struct {
 const Rule = struct {
 	const Self = @This();
 
-	cat_idx: usize,
 	cmp: Comparsion,
+	cat_idx: usize,
 	value: usize,
 	decision: Decision,
 
@@ -126,16 +159,16 @@ const Rule = struct {
 				return r;
 			},
 			'x' => {
-				r.cat_idx = @intFromEnum(Category.X);
+				r.cat_idx = 0;
 			},
 			'm' => {
-				r.cat_idx = @intFromEnum(Category.M);
+				r.cat_idx = 1;
 			},
 			'a' => {
-				r.cat_idx = @intFromEnum(Category.A);
+				r.cat_idx = 2;
 			},
 			's' => {
-				r.cat_idx = @intFromEnum(Category.S);
+				r.cat_idx = 3;
 			},
 			else => return null,
 		}
@@ -180,6 +213,7 @@ const Rule = struct {
 
 const Workflow = struct {
 	const Self = @This();
+	const Root = [3]u8{'i', 'n', 0};
 
 	allocator: std.mem.Allocator,
 	name: [3]u8,
@@ -201,7 +235,7 @@ const Workflow = struct {
 		return w;
 	}
 
-	pub fn apply(self: *Self, pr: PartRatings) Decision {
+	pub fn apply(self: *const Self, pr: PartRatings) Decision {
 		for (self.rules.items) |r| {
 			switch (r.cmp) {
 			.Always => return r.decision,
@@ -228,6 +262,68 @@ pub fn find_workflow(workflows: std.ArrayList(Workflow), name: [3]u8) ?*Workflow
 		}
 	}
 	return null;
+}
+
+pub fn _count_combinations(workflows: std.ArrayList(Workflow), wn: [3]u8, ri: usize, pr: PartRange) usize {
+	var combs: usize = 0;
+	var wf = find_workflow(workflows, wn) orelse unreachable;
+	var rule = wf.rules.items[ri];
+	switch (rule.cmp) {
+	.Always => {
+		switch (rule.decision) {
+		.Accept => {
+			combs += pr.combs();
+		},
+		.Reject => {},
+		.Send => |to| {
+			combs += _count_combinations(workflows, to, 0, pr);
+		},
+		}
+	},
+	.Gt => {
+		var split = pr.split_ge(rule.cat_idx, rule.value+1);
+		switch (rule.decision) {
+		.Accept => {
+			if (split[1]) |s| {
+				combs += s.combs();
+			}
+		},
+		.Reject => {},
+		.Send => |to| {
+			if (split[1]) |s| {
+				combs += _count_combinations(workflows, to, 0, s);
+			}
+		},
+		}
+		if (split[0]) |s| {
+			combs += _count_combinations(workflows, wn, ri+1, s);
+		}
+	},
+	.Lt => {
+		var split = pr.split_ge(rule.cat_idx, rule.value);
+		switch (rule.decision) {
+		.Accept => {
+			if (split[0]) |s| {
+				combs += s.combs();
+			}
+		},
+		.Reject => {},
+		.Send => |to| {
+			if (split[0]) |s| {
+				combs += _count_combinations(workflows, to, 0, s);
+			}
+		},
+		}
+		if (split[1]) |s| {
+			combs += _count_combinations(workflows, wn, ri+1, s);
+		}
+	},
+	}
+	return combs;
+}
+
+pub fn count_combinations(workflows: std.ArrayList(Workflow)) usize {
+	return _count_combinations(workflows, Workflow.Root, 0, PartRange.all());
 }
 
 pub fn main() !void {
@@ -257,7 +353,7 @@ pub fn main() !void {
 	while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
 		const P = PartRatings.from_line(line);
 		try parts.append(P);
-		var d = Decision{.Send = [3]u8{'i', 'n', 0}};
+		var d = Decision{.Send = Workflow.Root};
 		while (true) {
 			switch (d) {
 			.Accept => {
@@ -279,5 +375,44 @@ pub fn main() !void {
 		}
 	}
 	try stdout.print("{d}\n", .{part1});
+
+	const part2 = count_combinations(workflows);
+	try stdout.print("{d}\n", .{part2});
+}
+
+test "split range" {
+	var pr = PartRange{.begin = [4]usize{1, 1, 1, 1}, .end = [4]usize{4000, 4000, 4000, 400}};
+	var prs = pr.split_ge(0, 2000);
+	try std.testing.expect(prs[0] != null);
+	try std.testing.expect(prs[1] != null);
+	if (prs[0]) |p| {
+		try std.testing.expectEqual(p.begin[0], 1);
+		try std.testing.expectEqual(p.end[0], 1999);
+	}
+	if (prs[1]) |p| {
+		try std.testing.expectEqual(p.begin[0], 2000);
+		try std.testing.expectEqual(p.end[0], 4000);
+	}
+}
+
+test "split range all gt" {
+	var pr = PartRange{.begin = [4]usize{2000, 1, 1, 1}, .end = [4]usize{4000, 4000, 4000, 400}};
+	var prs = pr.split_ge(0, 1);
+	try std.testing.expect(prs[0] == null);
+	try std.testing.expect(prs[1] != null);
+	if (prs[1]) |p| {
+		try std.testing.expectEqual(p.begin[0], 2000);
+		try std.testing.expectEqual(p.end[0], 4000);
+	}
+}
+
+test "combs 2" {
+	var pr = PartRange{.begin = [4]usize{1, 1, 1, 1}, .end = [4]usize{2, 1, 1, 1}};
+	try std.testing.expectEqual(pr.combs(), 2);
+}
+
+test "combs 16" {
+	var pr = PartRange{.begin = [4]usize{1, 1, 1, 1}, .end = [4]usize{2, 2, 2, 2}};
+	try std.testing.expectEqual(pr.combs(), 16);
 }
 
