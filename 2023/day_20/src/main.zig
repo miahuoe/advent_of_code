@@ -63,8 +63,8 @@ const ModuleType = enum {
 	//
 	// H(0) -> [0] = [0]
 	// H(0) -> [1] = [1]
-	// L(1) -> [0] = [1] + H
-	// L(1) -> [1] = [0] + L
+	// L(1) -> [0] = [1] send H(0)
+	// L(1) -> [1] = [0] send L(1)
 	FlipFlop,
 
 	// H/L -> [H/L] for that input
@@ -125,9 +125,7 @@ pub fn main() !void {
 		var it = std.mem.splitSequence(u8, line, " -> ");
 		const src = it.next() orelse continue;
 		var idx: ModuleIdx = 0;
-		if (std.mem.eql(u8, src, "broadcaster")) {
-			try stdout.print("broadcaster -> ", .{});
-		} else {
+		if (!std.mem.eql(u8, src, "broadcaster")) {
 			const name = ModuleName.from(src[1..]);
 			if (module_names.get_module(name)) |i| {
 				idx = 1 + i;
@@ -159,7 +157,6 @@ pub fn main() !void {
 				try modules.append(module);
 			}
 		}
-		try stdout.print("{d}:{d} ->", .{idx, @intFromEnum(modules.items[idx].type)});
 
 		const dsts = it.next() orelse continue;
 		var dst_it = std.mem.splitSequence(u8, dsts, ", ");
@@ -187,11 +184,8 @@ pub fn main() !void {
 			var module = &modules.items[idx];
 			module.outputs[module.outputs_count] = midx;
 			module.outputs_count += 1;
-			try stdout.print(" [{d} {s}]", .{midx, dst});
 		}
-		try stdout.print("\n", .{});
 	}
-	try stdout.print("{d} modules\n", .{modules.items.len});
 	for (0..modules.items.len) |m| {
 		var mod = &modules.items[m];
 		switch (mod.type) {
@@ -210,16 +204,6 @@ pub fn main() !void {
 			mod_out.inputs[mod_out.inputs_count] = m;
 			mod_out.inputs_count += 1;
 		}
-	}
-	for (modules.items, 0..) |mod, mi| {
-		try stdout.print("[{d}] {s}\n", .{mi, @tagName(mod.type)});
-		for (0..mod.inputs_count) |ii| {
-			try stdout.print("\tin {d}\n", .{mod.inputs[ii]});
-		}
-		for (0..mod.outputs_count) |oi| {
-			try stdout.print("\tout {d} [{d}]\n", .{mod.outputs[oi], mod.output_slot[oi]});
-		}
-		try stdout.print("\n", .{});
 	}
 	var q = std.ArrayList(Pulse).init(allocator);
 	defer q.deinit();
@@ -243,20 +227,6 @@ pub fn main() !void {
 				}
 				var oidx = mod.outputs[oi];
 				var out = &modules.items[oidx];
-
-				//if (mod_idx == 0) {
-				//	try stdout.print("broadcaster", .{});
-				//} else {
-				//	const name = module_names.names.items[mod_idx-1].str;
-				//	try stdout.print("{s}", .{name});
-				//}
-				//if (signal) {
-				//	try stdout.print(" -low-> ", .{});
-				//} else {
-				//	try stdout.print(" -high-> ", .{});
-				//}
-				//const name = module_names.names.items[oidx-1].str;
-				//try stdout.print("{s}\n", .{name});
 
 				switch (out.type) {
 				else => {},
