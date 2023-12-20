@@ -63,8 +63,8 @@ const ModuleType = enum {
 	//
 	// H(0) -> [0] = [0]
 	// H(0) -> [1] = [1]
-	// L(1) -> [0] = [1] send H(0)
-	// L(1) -> [1] = [0] send L(1)
+	// L(1) -> [0] = [1] + H
+	// L(1) -> [1] = [0] + L
 	FlipFlop,
 
 	// H/L -> [H/L] for that input
@@ -93,6 +93,19 @@ const Pulse = struct {
 	src: usize,
 	state: bool,
 };
+
+pub fn lcm(a: usize, b: usize) usize {
+        var A: usize = a;
+        var B: usize = b;
+        while (A != B) {
+                if (A > B) {
+                        B += b;
+                } else {
+                        A += a;
+                }
+        }
+        return A;
+}
 
 pub fn main() !void {
 	var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -208,10 +221,39 @@ pub fn main() !void {
 	var q = std.ArrayList(Pulse).init(allocator);
 	defer q.deinit();
 
+	const rx_idx = 1 + (module_names.get_module(ModuleName.from(&[2]u8{'r', 'x'})) orelse return);
+
+	var inv_count: usize = 0;
+	var inv: [16]usize = undefined;
+	var invp: [16]?usize = undefined;
+	@memset(&invp, null);
+	loop_find_pre_rx: for (0..modules.items.len) |m| {
+		var mod = &modules.items[m];
+		for (0..mod.outputs_count) |o| {
+			var out_idx = mod.outputs[o];
+			if (out_idx == rx_idx) {
+				inv_count = mod.inputs_count;
+				@memcpy(inv[0..inv_count], mod.inputs[0..inv_count]);
+				break :loop_find_pre_rx;
+			}
+		}
+	}
+
 	var high_pulses: usize = 0;
 	var low_pulses: usize = 0;
-	const pushes: usize = 1000;
-	for (0..pushes) |_| {
+	var press_idx: usize = 0;
+	var part1: usize = 0;
+	while (true) : (press_idx += 1) {
+		if (press_idx == 1000) {
+			part1 = high_pulses*low_pulses;
+		}
+		var got_all: bool = true;
+		for (0..inv_count) |i| {
+			got_all = got_all and invp[i] != null;
+		}
+		if (got_all and press_idx >= 1000) {
+			break;
+		}
 		try q.append(.{.src = 0, .state = true});
 		low_pulses += 1;
 		while (q.items.len > 0) {
@@ -220,13 +262,20 @@ pub fn main() !void {
 			const signal = pulse.state;
 			var mod = &modules.items[mod_idx];
 			for (0..mod.outputs_count) |oi| {
+				var oidx = mod.outputs[oi];
+				var out = &modules.items[oidx];
 				if (signal) {
 					low_pulses += 1;
+					for (0..inv_count) |i| {
+						if (inv[i] == oidx) {
+							if (invp[i] == null) {
+								invp[i] = press_idx;
+							}
+						}
+					}
 				} else {
 					high_pulses += 1;
 				}
-				var oidx = mod.outputs[oi];
-				var out = &modules.items[oidx];
 
 				switch (out.type) {
 				else => {},
@@ -250,7 +299,16 @@ pub fn main() !void {
 			}
 		}
 	}
-	const part1 = high_pulses*low_pulses;
+
 	try stdout.print("{d}\n", .{part1});
+	var invpp: [16]usize = undefined;
+	for (0..inv_count) |i| {
+		if (invp[i]) |p| {
+			invpp[i] = p+1;
+		}
+	}
+	std.debug.assert(inv_count == 4);
+	var part2: usize = lcm(lcm(invpp[0], invpp[1]), lcm(invpp[2], invpp[3]));
+	try stdout.print("{d}\n", .{part2});
 }
 
