@@ -40,7 +40,7 @@ const Map = struct {
 		self.h += 1;
 	}
 
-	pub fn reach(self: *Self, start: @Vector(2, i64), steps: i64) !@Vector(2, i64) {
+	pub fn reach(self: *Self, start: @Vector(2, i64), steps: i64) !@Vector(4, i64) {
 		var prev = try self.allocator.alloc(bool, self.grid.items.len);
 		defer self.allocator.free(prev);
 
@@ -92,18 +92,31 @@ const Map = struct {
 				}
 			}
 		}
-		var eo = @Vector(2, i64){0, 0};
+		var eo = @Vector(4, i64){0, 0, 0, 0};
+		// [0] = reachable even
+		// [1] = reachable odd
+		// [2] = unreachable even
+		// [3] = unreachable odd
 		var y: i64 = 0;
 		while (y < self.h) : (y += 1) {
 			var x: i64 = 0;
 			while (x < self.w) : (x += 1) {
-				if (!next[@intCast(y * self.w + x)]) {
+				const idx: usize = @intCast(y * self.w + x);
+				if (self.grid.items[idx] != '.') {
 					continue;
 				}
-				if (@rem(x + y, 2) == 0) {
-					eo[0] += 1;
+				if (next[idx]) {
+					if (@rem(x + y, 2) == 0) {
+						eo[0] += 1;
+					} else {
+						eo[1] += 1;
+					}
 				} else {
-					eo[1] += 1;
+					if (@rem(x + y, 2) == 0) {
+						eo[2] += 1;
+					} else {
+						eo[3] += 1;
+					}
 				}
 			}
 		}
@@ -119,19 +132,43 @@ const Map = struct {
 		const M: i64 = @divTrunc(W, 2); // grid [M]iddle
 		const r: i64 = @divTrunc(S, W); // diamond [r]adius
 		const rem: i64 = @rem(S, W);
+		const R = @Vector(2, i64){0, M};
+		const L = @Vector(2, i64){W-1, M};
+		const U = @Vector(2, i64){M, W-1};
+		const D = @Vector(2, i64){M, 0};
+		const rd = @Vector(2, i64){0, 0};
+		const ru = @Vector(2, i64){0, W-1};
+		const ld = @Vector(2, i64){W-1, 0};
+		const lu = @Vector(2, i64){W-1, W-1};
+		const e: usize = 0; // TODO swap e and o depending on oddness of farthest grid
+		const o: usize = 1;
 
 		const whole = try self.reach(.{M, M}, W);
-		const rd = try self.reach(.{0, 0}, rem-1);
-		const ru = try self.reach(.{0, W-1}, rem-1);
-		const ld = try self.reach(.{W-1, 0}, rem-1);
-		const lu = try self.reach(.{W-1, W-1}, rem-1);
 
-		var re: i64 = 0;
-		re += (r + 1) * (r + 1) * whole[1];
-		re += r * r * whole[0];
-		re -= (r + 1) * (rd[1] + ru[1] + ld[1] + lu[1]);
-		re += r * (rd[0] + ru[0] + ld[0] + lu[0]);
-		return re;
+		var whole_o: i64 = (r - 1) * (r - 1) * whole[o];
+		var whole_e: i64 = r * r * whole[e];
+
+		var corners: i64 = (0
+			+ (try self.reach(R, W-1))[o]
+			+ (try self.reach(L, W-1))[o]
+			+ (try self.reach(U, W-1))[o]
+			+ (try self.reach(D, W-1))[o]
+		);
+
+		var small_partial: i64 = r * (0
+			+ (try self.reach(rd, rem-1))[e]
+			+ (try self.reach(ru, rem-1))[e]
+			+ (try self.reach(ld, rem-1))[e]
+			+ (try self.reach(lu, rem-1))[e]
+		);
+		var big_partial: i64 = (r - 1) * (0
+			+ (try self.reach(rd, W+rem))[o]
+			+ (try self.reach(ru, W+rem))[o]
+			+ (try self.reach(ld, W+rem))[o]
+			+ (try self.reach(lu, W+rem))[o]
+		);
+
+		return corners + whole_o + whole_e + big_partial + small_partial;
 
 	}
 };
@@ -156,6 +193,5 @@ pub fn main() !void {
 
 	const part2 = try map.reach_big(26501365);
 	try stdout.print("{d}\n", .{part2});
-	// TODO outputs 620348632112622
 }
 
