@@ -1,6 +1,5 @@
 const std = @import("std");
 
-
 const Map = struct {
 	const Self = @This();
 
@@ -29,11 +28,11 @@ const Map = struct {
 	pub fn append_row(self: *Self, row: []u8) !void {
 		var r = try self.grid.addManyAsSlice(row.len);
 		@memcpy(r, row);
-		for (row, 0..) |c, x| {
+		for (r, 0..) |c, x| {
 			if (c == 'S') {
+				r[x] = '.';
 				self.sx = @intCast(x);
 				self.sy = self.h;
-				r[x] = '.';
 				break;
 			}
 		}
@@ -41,22 +40,20 @@ const Map = struct {
 		self.h += 1;
 	}
 
-	pub fn calculate_reachability(self: *Self, steps: usize) !usize {
-		const initial = [4]usize{
-			@intCast((self.sy+0) * self.w + (self.sx+1)),
-			@intCast((self.sy+0) * self.w + (self.sx-1)),
-			@intCast((self.sy+1) * self.w + (self.sx+0)),
-			@intCast((self.sy-1) * self.w + (self.sx+0)),
-		};
-		var reachability = try self.allocator.alloc(u64, self.grid.items.len);
-		defer self.allocator.free(reachability);
-		@memset(reachability, 0);
-		for (initial) |i| {
-			if (self.grid.items[i] == '.') {
-				reachability[i] |= 1;
-			}
-		}
-		for (1..steps) |step| {
+	pub fn reach(self: *Self, start: @Vector(2, i64), steps: i64) !@Vector(2, i64) {
+		var prev = try self.allocator.alloc(bool, self.grid.items.len);
+		defer self.allocator.free(prev);
+
+		var next = try self.allocator.alloc(bool, self.grid.items.len);
+		defer self.allocator.free(next);
+
+		@memset(prev, false);
+		@memset(next, false);
+		next[@intCast(start[1] * self.w + start[0])] = true;
+
+		var s: i64 = 0;
+		while (s < steps) : (s += 1) {
+			@memcpy(prev, next);
 			var y: i64 = 0;
 			while (y < self.h) : (y += 1) {
 				var x: i64 = 0;
@@ -65,43 +62,77 @@ const Map = struct {
 					if (self.grid.items[idx] != '.') {
 						continue;
 					}
-					var neighbours_reachable_in_prev_step: usize = 0;
+					if (prev[idx]) {
+						continue;
+					}
 					var N = [4]@Vector(2, i64){
 						@Vector(2, i64){-1, 0},
 						@Vector(2, i64){1, 0},
 						@Vector(2, i64){0, -1},
 						@Vector(2, i64){0, 1},
 					};
+					var visited_neighbours: usize = 0;
 					for (N) |n| {
-						if (x+n[0] < 0 or x+n[0] >= self.w or y+n[1] < 0 or y+n[1] >= self.h) {
+						const X = x+n[0];
+						const Y = y+n[1];
+						if (X < 0 or X >= self.w or Y < 0 or Y >= self.h) {
 							continue;
 						}
-						const nidx: usize = @intCast((y+n[1]) * self.w + (x+n[0]));
-						const tile = self.grid.items[nidx];
-						if (tile != '.') {
+						const nidx: usize = @intCast(Y * self.w + X);
+						if (self.grid.items[nidx] != '.') {
 							continue;
 						}
-						const reach = reachability[nidx];
-						const mask: usize = @shlExact(@as(u64, 1), @intCast(step-1));
-						if (0 != (reach & mask)) {
-							neighbours_reachable_in_prev_step += 1;
+						if (prev[nidx]) {
+							visited_neighbours += 1;
 						}
 					}
-					if (neighbours_reachable_in_prev_step > 0) {
-						const mask: usize = @shlExact(@as(u64, 1), @intCast(step));
-						reachability[idx] |= mask;
+					if (visited_neighbours > 0) {
+						next[idx] = true;
 					}
 				}
 			}
 		}
-		var c: usize = 0;
-		const mask: usize = @shlExact(@as(usize, 1), @intCast(steps-1));
-		for (reachability) |r| {
-			if (0 != (r & mask)) {
-				c += 1;
+		var eo = @Vector(2, i64){0, 0};
+		var y: i64 = 0;
+		while (y < self.h) : (y += 1) {
+			var x: i64 = 0;
+			while (x < self.w) : (x += 1) {
+				if (!next[@intCast(y * self.w + x)]) {
+					continue;
+				}
+				if (@rem(x + y, 2) == 0) {
+					eo[0] += 1;
+				} else {
+					eo[1] += 1;
+				}
 			}
 		}
-		return c;
+		return eo;
+	}
+
+	pub fn reach_big(self: *Self, steps: i64) !i64 {
+		std.debug.assert(self.w == self.h);
+		// Operations hardcoded to fit my input
+
+		const S: i64 = @intCast(steps);
+		const W: i64 = @intCast(self.w); // grid [W]idth
+		const M: i64 = @divTrunc(W, 2); // grid [M]iddle
+		const r: i64 = @divTrunc(S, W); // diamond [r]adius
+		const rem: i64 = @rem(S, W);
+
+		const whole = try self.reach(.{M, M}, W);
+		const rd = try self.reach(.{0, 0}, rem-1);
+		const ru = try self.reach(.{0, W-1}, rem-1);
+		const ld = try self.reach(.{W-1, 0}, rem-1);
+		const lu = try self.reach(.{W-1, W-1}, rem-1);
+
+		var re: i64 = 0;
+		re += (r + 1) * (r + 1) * whole[1];
+		re += r * r * whole[0];
+		re -= (r + 1) * (rd[1] + ru[1] + ld[1] + lu[1]);
+		re += r * (rd[0] + ru[0] + ld[0] + lu[0]);
+		return re;
+
 	}
 };
 
@@ -120,7 +151,11 @@ pub fn main() !void {
 	while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
 		try map.append_row(line);
 	}
-	const part1 = try map.calculate_reachability(64);
-	try stdout.print("{d}\n", .{part1});
+	const part1 = try map.reach(.{map.sx, map.sy}, 64);
+	try stdout.print("{d}\n", .{part1[0]});
+
+	const part2 = try map.reach_big(26501365);
+	try stdout.print("{d}\n", .{part2});
+	// TODO outputs 620348632112622
 }
 
