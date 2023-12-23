@@ -6,35 +6,26 @@ const Brick = struct {
 	begin: @Vector(3, usize),
 	end: @Vector(3, usize),
 
-	supports_count: usize,
-	supports: [8]usize,
-	supported_count: usize,
-	supported: [8]usize,
+	supports: std.AutoHashMap(usize, void),
+	supported_by: std.AutoHashMap(usize, void),
 
-	pub fn add_supported_by(self: *Self, bidx: usize) void {
-		for (0..self.supported_count) |i| {
-			if (self.supported[i] == bidx) {
-				return;
-			}
-		}
-		self.supported[self.supported_count] = bidx;
-		self.supported_count += 1;
+	pub fn add_supported_by(self: *Self, bidx: usize) !void {
+		_ = try self.supported_by.fetchPut(bidx, {});
 	}
 
-	pub fn add_supports(self: *Self, bidx: usize) void {
-		for (0..self.supports_count) |i| {
-			if (self.supports[i] == bidx) {
-				return;
-			}
-		}
-		self.supports[self.supports_count] = bidx;
-		self.supports_count += 1;
+	pub fn add_supports(self: *Self, bidx: usize) !void {
+		_ = try self.supports.fetchPut(bidx, {});
 	}
 
-	pub fn from_line(line: []u8) !?Self {
+	pub fn deinit(self: *Self) void {
+		self.supports.deinit();
+		self.supported_by.deinit();
+	}
+
+	pub fn from_line(line: []u8, allocator: std.mem.Allocator) !?Self {
 		var b: Self = undefined;
-		b.supports_count = 0;
-		b.supported_count = 0;
+		b.supports = std.AutoHashMap(usize, void).init(allocator);
+		b.supported_by = std.AutoHashMap(usize, void).init(allocator);
 
 		var ends_it = std.mem.tokenizeAny(u8, line, "~");
 		const begin = ends_it.next() orelse return null;
@@ -115,13 +106,47 @@ const Height = struct {
 
 pub fn can_be_removed(bricks: *std.ArrayList(Brick), bidx: usize) bool {
 	var b = &bricks.items[bidx];
-	for (0..b.supports_count) |i| {
-		var s = bricks.items[b.supports[i]];
-		if (s.supported_count < 2) {
+	var it = b.supports.keyIterator();
+	while (it.next()) |i| {
+		var s = bricks.items[i.*];
+		if (s.supported_by.count() < 2) {
 			return false;
 		}
 	}
 	return true;
+}
+
+pub fn contains_all(comptime T: type, superset: *std.AutoHashMap(usize, T), set: *std.AutoHashMap(usize, T)) bool {
+	var it = set.keyIterator();
+	while (it.next()) |i| {
+		if (!superset.contains(i.*)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+pub fn fall_on_removal(bricks: *std.ArrayList(Brick), bidx: usize, allocator: std.mem.Allocator) !usize {
+	var fallen = std.AutoHashMap(usize, void).init(allocator);
+	defer fallen.deinit();
+	var to_fall = std.ArrayList(usize).init(allocator);
+	defer to_fall.deinit();
+
+	try to_fall.append(bidx);
+	_ = try fallen.fetchPut(bidx, {});
+
+	while (to_fall.items.len > 0) {
+		var b = &bricks.items[to_fall.swapRemove(0)];
+		var supports_it = b.supports.keyIterator();
+		while (supports_it.next()) |s| {
+			var S = &bricks.items[s.*];
+			if (contains_all(void, &fallen, &S.supported_by)) {
+				try to_fall.append(s.*);
+				_ = try fallen.fetchPut(s.*, {});
+			}
+		}
+	}
+	return fallen.count() - 1;
 }
 
 pub fn main() !void {
@@ -138,10 +163,13 @@ pub fn main() !void {
 	defer bricks.deinit();
 
 	while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-		if (try Brick.from_line(line)) |brick| {
+		if (try Brick.from_line(line, allocator)) |brick| {
 			try bricks.append(brick);
 		}
 	}
+	defer for (0..bricks.items.len) |i| {
+		bricks.items[i].deinit();
+	};
 	std.sort.insertion(Brick, bricks.items, {}, Brick.cmp);
 
 	const ex = bricks_grid_size(&bricks);
@@ -165,8 +193,8 @@ pub fn main() !void {
 				const h = &height_map.items[b.begin[1] * ex.max[0] + x];
 				if (h.bidx) |i| {
 					if (h.z == max_z) {
-						bricks.items[i].add_supports(bidx);
-						b.add_supported_by(i);
+						try bricks.items[i].add_supports(bidx);
+						try b.add_supported_by(i);
 					}
 				}
 				h.z = max_z+1;
@@ -183,8 +211,8 @@ pub fn main() !void {
 				const h = &height_map.items[y * ex.max[0] + b.begin[0]];
 				if (h.bidx) |i| {
 					if (h.z == max_z) {
-						bricks.items[i].add_supports(bidx);
-						b.add_supported_by(i);
+						try bricks.items[i].add_supports(bidx);
+						try b.add_supported_by(i);
 					}
 				}
 				h.z = max_z+1;
@@ -194,8 +222,8 @@ pub fn main() !void {
 		2 => {
 			const h = &height_map.items[b.begin[1] * ex.max[0] + b.begin[0]];
 			if (h.bidx) |i| {
-				b.add_supported_by(i);
-				bricks.items[i].add_supports(bidx);
+				try b.add_supported_by(i);
+				try bricks.items[i].add_supports(bidx);
 			}
 			h.z += b.length();
 			h.bidx = bidx;
@@ -204,11 +232,14 @@ pub fn main() !void {
 		}
 	}
 	var part1: usize = 0;
+	var part2: usize = 0;
 	for (0..bricks.items.len) |bidx| {
 		if (can_be_removed(&bricks, bidx)) {
 			part1 += 1;
 		}
+		part2 += try fall_on_removal(&bricks, bidx, allocator);
 	}
 	try stdout.print("{d}\n", .{part1});
+	try stdout.print("{d}\n", .{part2});
 }
 
