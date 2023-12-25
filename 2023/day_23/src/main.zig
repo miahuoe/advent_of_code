@@ -4,6 +4,25 @@ const Node = struct {
 	begin: usize,
 	end: usize,
 	length: usize,
+
+	pub fn sort(self: *Node) void {
+		if (self.begin > self.end) {
+			const tmp = self.begin;
+			self.begin = self.end;
+			self.end = tmp;
+		}
+	}
+
+	pub fn eql(self: Node, other: Node) bool {
+		return self.begin == other.begin and self.end == other.end;
+	}
+
+	pub fn cmp(_: void, a: Node, b: Node) bool {
+		if (a.begin == b.begin) {
+			return a.end < b.end;
+		}
+		return a.begin < b.begin;
+	}
 };
 
 const NeighbourIterator = struct {
@@ -102,6 +121,15 @@ const Map = struct {
 		};
 	}
 
+	pub fn prepare_part2(self: *Self) void {
+		for (0..self.grid.items.len) |i| {
+			const g = self.grid.items[i];
+			if (g == '>' or g == '<' or g == 'v' or g == '^') {
+				self.grid.items[i] = '.';
+			}
+		}
+	}
+
 	pub fn append_row(self: *Self, row: []u8) !void {
 		var r = try self.grid.addManyAsSlice(row.len);
 		@memcpy(r, row);
@@ -117,7 +145,7 @@ const Map = struct {
 		};
 	}
 
-	pub fn max_distance2(self: *Self, visited: []bool, nodes: *std.ArrayList(Node), idx: usize, E: usize) ?usize {
+	pub fn max_distance_helper(self: *Self, visited: []bool, nodes: *std.ArrayList(Node), idx: usize, E: usize) ?usize {
 		const U = nodes.items[idx];
 		if (U.end == E) {
 			return U.length;
@@ -129,7 +157,7 @@ const Map = struct {
 				if (visited[j]) {
 					continue;
 				}
-				const dist = self.max_distance2(visited, nodes, j, E);
+				const dist = self.max_distance_helper(visited, nodes, j, E);
 				if (dist) |d| {
 					const D = U.length + d;
 					if (max_dist) |md| {
@@ -146,12 +174,44 @@ const Map = struct {
 		return max_dist;
 	}
 
+	pub fn max_distance_part2_helper(self: *Self, visited: []bool, nodes: *std.ArrayList(Node), idx: usize, junction: usize, end: usize) ?usize {
+		const U = nodes.items[idx];
+		if (U.end == end or U.begin == end) {
+			return U.length;
+		}
+		visited[junction] = true;
+		var max_dist: ?usize = null;
+		for (nodes.items, 0..) |V, j| {
+			var do = false;
+			var new_junction: usize = 0;
+			if (V.begin == junction) {
+				do = !visited[V.end];
+				new_junction = V.end;
+			}
+			if (V.end == junction) {
+				do = !visited[V.begin];
+				new_junction = V.begin;
+			}
+			if (!do) {
+				continue;
+			}
+			const dist = self.max_distance_part2_helper(visited, nodes, j, new_junction, end);
+			if (dist) |d| {
+				const D = U.length + d;
+				if (max_dist) |md| {
+					if (D > md) {
+						max_dist = D;
+					}
+				} else {
+					max_dist = D;
+				}
+			}
+		}
+		visited[junction] = false;
+		return max_dist;
+	}
+
 	pub fn max_distance_part1(self: *Self) !usize {
-		var path = try self.allocator.alloc(usize, self.grid.items.len);
-		defer self.allocator.free(path);
-
-		@memset(path, 1000);
-
 		var nodes = std.ArrayList(Node).init(self.allocator);
 		defer nodes.deinit();
 
@@ -177,7 +237,6 @@ const Map = struct {
 			visited[begin] = true;
 			visited[U] = true;
 
-			path[U] = begin;
 			if ((E == U) or (begin != U and self.grid.items[U] != '.')) {
 				var n: Node = .{.begin = begin, .end = U, .length = length};
 				try nodes.append(n);
@@ -200,7 +259,85 @@ const Map = struct {
 			}
 		}
 		@memset(visited, false);
-		return self.max_distance2(visited, &nodes, B, E) orelse 0;
+		return self.max_distance_helper(visited, &nodes, B, E) orelse 0;
+	}
+
+	pub fn max_distance_part2(self: *Self) !usize {
+		var nodes = std.ArrayList(Node).init(self.allocator);
+		defer nodes.deinit();
+
+		var pending = std.ArrayList(@Vector(4, usize)).init(self.allocator);
+		defer pending.deinit();
+
+		const E: usize = @intCast(self.w*self.h-2);
+
+		var visited = try self.allocator.alloc(bool, self.grid.items.len);
+		defer self.allocator.free(visited);
+		@memset(visited, false);
+
+		try pending.append(.{0, 1, 1, 0});
+
+		while (pending.items.len > 0) {
+			const O = pending.orderedRemove(0);
+			const prev = O[0];
+			const begin = O[1];
+			var U = O[2];
+			var length = O[3];
+
+			var neighbours = std.ArrayList(usize).init(self.allocator);
+			defer neighbours.deinit();
+			var neighbours_it = self.neighbours_of(U);
+			while (neighbours_it.next()) |V| {
+				if (V == prev) {
+					continue;
+				}
+				try neighbours.append(V);
+			}
+			if (neighbours.items.len == 0) {
+				try nodes.append(.{.begin = begin, .end = U, .length = length});
+			} else if (neighbours.items.len > 1 or U == E) {
+				try nodes.append(.{.begin = begin, .end = U, .length = length});
+				if (!visited[U]) {
+					for (neighbours.items) |V| {
+						try pending.append(.{U, U, V, 1});
+					}
+					visited[U] = true;
+				}
+			} else {
+				for (neighbours.items) |V| {
+					try pending.append(.{U, begin, V, length+1});
+				}
+			}
+		}
+
+		const N = nodes.items.len;
+		for (0..N) |i| {
+			nodes.items[i].sort();
+		}
+		std.sort.insertion(Node, nodes.items, {}, Node.cmp);
+		var ii: usize = 1;
+		while (ii < nodes.items.len) {
+			if (nodes.items[ii-1].eql(nodes.items[ii])) {
+				_ = nodes.orderedRemove(ii-1);
+				continue;
+			}
+			ii += 1;
+		}
+
+		var B: usize = 0;
+		for (nodes.items, 0..) |n, i| {
+			if (n.begin == 1) {
+				B = i;
+				break;
+			}
+		}
+
+		var vis = try self.allocator.alloc(bool, self.grid.items.len);
+		defer self.allocator.free(vis);
+		@memset(vis, false);
+
+		visited[B] = true;
+		return self.max_distance_part2_helper(vis, &nodes, B, nodes.items[B].end, E) orelse 0;
 	}
 };
 
@@ -221,5 +358,10 @@ pub fn main() !void {
 	}
 	const part1 = try map.max_distance_part1();
 	try stdout.print("{d}\n", .{part1});
+
+	map.prepare_part2();
+
+	const part2 = try map.max_distance_part2();
+	try stdout.print("{d}\n", .{part2});
 }
 
