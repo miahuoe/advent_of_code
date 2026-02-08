@@ -1,4 +1,6 @@
 .git/
 **/zig-cache/*
 **/zig-out/*
-*.txt
+2023/**/*.txt
+2024/inputs/*
+2024/build/*
