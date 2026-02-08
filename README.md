@@ -9,5 +9,5 @@ C++. Done in february 2026. Run:
 cmake -S . -B build
 cmake --build build --target run_all
 ```
-To compile and run all examples.
+To compile and run all examples. Inputs not included.
 
