@@ -18,3 +18,16 @@ add_custom_command(
 	COMMENT "${name} star1 input"
 )
 
+add_custom_command(
+	TARGET day_03_run_all
+	COMMAND ./${name} 2 < ${INPUTS_BUILD_DIR}/day_03_example.txt
+	DEPENDS ${name}
+	COMMENT "${name} star2 example"
+)
+
+add_custom_command(
+	TARGET day_03_run_all
+	COMMAND ./${name} 2 < ${INPUTS_BUILD_DIR}/day_03_input.txt
+	DEPENDS ${name}
+	COMMENT "${name} star2 input"
+)
